@@ -1,0 +1,181 @@
+# Credit Agreement Extraction Pipeline
+#
+# Extracts key terms from credit agreements (typically 100-600+ pages).
+# Uses hierarchical structure detection for efficient processing.
+
+extraction_use_case:
+  id: "credit-agreement"
+  name: "Credit Agreement Key Terms Extraction"
+  description: "Extracts key terms and provisions from credit agreements"
+
+  # Document types
+  document_types:
+    - type: credit_agreement
+      required: true
+      aliases: ["loan_agreement", "facility_agreement"]
+
+  # Large document handling - ENABLED for credit agreements
+  large_document_handling:
+    enabled: true
+    strategy: section_based
+    max_pages_per_batch: 80
+    always_include_sections:
+      - "Definitions"
+      - "Article I"
+      - "Section 1.01"
+
+  # Triggers
+  triggers:
+    manual:
+      enabled: true
+      roles:
+        - loan_ops
+        - credit_analyst
+        - legal
+
+    api:
+      enabled: true
+
+  # Extraction schema
+  extraction_schema:
+    # Parties
+    borrower:
+      type: object
+      description: "The borrower/obligor under the agreement"
+      properties:
+        legal_name:
+          type: string
+        jurisdiction:
+          type: string
+        type:
+          type: string
+          enum: ["corporation", "llc", "partnership", "other"]
+      likely_sections:
+        - "Preamble"
+        - "Definitions"
+        - "Parties"
+
+    administrative_agent:
+      type: object
+      description: "The administrative agent"
+      properties:
+        name:
+          type: string
+        address:
+          type: string
+      likely_sections:
+        - "Preamble"
+        - "Definitions"
+        - "Article IX"
+
+    # Facility terms
+    facility_type:
+      type: string
+      description: "Type of credit facility"
+      enum: ["term_loan", "revolving", "delayed_draw", "multi_tranche"]
+      likely_sections:
+        - "Definitions"
+        - "Article II"
+        - "Commitments"
+
+    total_commitment:
+      type: object
+      description: "Total commitment amount"
+      properties:
+        amount:
+          type: number
+        currency:
+          type: string
+      likely_sections:
+        - "Article II"
+        - "Commitments"
+        - "Schedule 2.01"
+
+    maturity_date:
+      type: date
+      description: "Final maturity date of the facility"
+      likely_sections:
+        - "Definitions"
+        - "Article II"
+
+    # Pricing
+    interest_rate:
+      type: object
+      description: "Interest rate provisions"
+      properties:
+        base_rate_margin:
+          type: number
+        sofr_margin:
+          type: number
+        default_rate_spread:
+          type: number
+      likely_sections:
+        - "Definitions"
+        - "Interest"
+        - "Article II"
+
+    # Financial covenants
+    financial_covenants:
+      type: array
+      description: "List of financial covenants"
+      items:
+        type: object
+        properties:
+          name:
+            type: string
+          metric:
+            type: string
+          threshold:
+            type: number
+          testing_frequency:
+            type: string
+      likely_sections:
+        - "Financial Covenants"
+        - "Article VII"
+        - "Section 7"
+
+    # Key dates
+    closing_date:
+      type: date
+      description: "Closing date of the agreement"
+      likely_sections:
+        - "Preamble"
+        - "Definitions"
+        - "Conditions Precedent"
+
+    # Amendments
+    amendment_threshold:
+      type: object
+      description: "Thresholds for amending the agreement"
+      properties:
+        required_lenders_percentage:
+          type: number
+        super_majority_percentage:
+          type: number
+        unanimous_consent_items:
+          type: array
+      likely_sections:
+        - "Amendments"
+        - "Article X"
+        - "Miscellaneous"
+
+  # Workflow
+  workflow:
+    maker_checker:
+      enabled: true
+      auto_approve_threshold: 0.90
+
+      multi_attest:
+        required_count: 2
+        roles:
+          - credit_analyst
+          - legal
+
+    override_policy:
+      require_justification: true
+      min_justification_length: 30
+
+  # Post-sinks
+  post_sinks:
+    - type: webhook
+      url: "${DEAL_MANAGEMENT_WEBHOOK_URL}"

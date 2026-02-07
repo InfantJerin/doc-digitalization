@@ -1,0 +1,186 @@
+# Covenant Compliance Extraction Pipeline
+#
+# Extracts covenant compliance data from compliance certificates
+# and financial statements for loan deals.
+
+extraction_use_case:
+  id: "covenant-compliance"
+  name: "Covenant Compliance Extraction"
+  description: "Extracts covenant compliance metrics from financial documents"
+
+  # Document types this pipeline processes
+  document_types:
+    - type: compliance_certificate
+      required: true
+      aliases: ["cert", "compliance_cert", "covenant_cert"]
+    - type: financial_statement
+      required: true
+      multi: true  # Can have multiple (quarterly, annual)
+      subtypes: ["balance_sheet", "income_statement", "cash_flow"]
+
+  # Large document handling (for credit agreements)
+  large_document_handling:
+    enabled: false  # Enable for documents > 100 pages
+    strategy: section_based
+    max_pages_per_batch: 100
+    always_include_sections:
+      - "Definitions"
+      - "Financial Covenants"
+
+  # Trigger configuration
+  triggers:
+    manual:
+      enabled: true
+      roles:
+        - loan_ops
+        - analyst
+        - senior_analyst
+
+    rules:
+      - name: "Auto-trigger when both doc types present"
+        when:
+          type: document_set_complete
+          document_types:
+            - compliance_certificate
+            - financial_statement
+        action: trigger_extraction
+        document_selection: latest_of_each_type
+
+    api:
+      enabled: true
+
+  # Extraction schema - what fields to extract
+  extraction_schema:
+    covenant_period:
+      type: object
+      description: "The period covered by this compliance certificate"
+      properties:
+        start_date:
+          type: date
+        end_date:
+          type: date
+        period_type:
+          type: string
+          enum: ["quarterly", "annual", "monthly"]
+      likely_sections:
+        - "Compliance Certificate"
+        - "Definitions"
+      sources:
+        - compliance_certificate
+
+    leverage_ratio:
+      type: object
+      description: "Debt to EBITDA ratio covenant"
+      properties:
+        current_ratio:
+          type: number
+        covenant_max:
+          type: number
+        in_compliance:
+          type: boolean
+        headroom:
+          type: number
+      likely_sections:
+        - "Financial Covenants"
+        - "Section 7"
+      sources:
+        - compliance_certificate
+        - financial_statement
+      cross_validate: true
+
+    interest_coverage_ratio:
+      type: object
+      description: "Interest coverage ratio covenant"
+      properties:
+        current_ratio:
+          type: number
+        covenant_min:
+          type: number
+        in_compliance:
+          type: boolean
+      likely_sections:
+        - "Financial Covenants"
+      sources:
+        - compliance_certificate
+
+    minimum_liquidity:
+      type: object
+      description: "Minimum liquidity covenant"
+      properties:
+        current_amount:
+          type: number
+        covenant_min:
+          type: number
+        currency:
+          type: string
+        in_compliance:
+          type: boolean
+      likely_sections:
+        - "Financial Covenants"
+        - "Liquidity"
+      sources:
+        - compliance_certificate
+        - financial_statement
+
+    compliance_status:
+      type: string
+      description: "Overall compliance status"
+      enum:
+        - COMPLIANT
+        - BREACH
+        - WAIVER_REQUESTED
+        - PENDING
+      likely_sections:
+        - "Compliance Certificate"
+        - "Summary"
+      sources:
+        - compliance_certificate
+
+    certification_date:
+      type: date
+      description: "Date the certificate was signed"
+      likely_sections:
+        - "Signature"
+        - "Certification"
+      sources:
+        - compliance_certificate
+
+    certifying_officer:
+      type: object
+      description: "Officer who signed the certificate"
+      properties:
+        name:
+          type: string
+        title:
+          type: string
+      likely_sections:
+        - "Signature"
+      sources:
+        - compliance_certificate
+
+  # Workflow configuration
+  workflow:
+    maker_checker:
+      enabled: true
+      auto_approve_threshold: 0.95
+
+      multi_attest:
+        required_count: 2
+        roles:
+          - analyst
+          - senior_analyst
+
+    override_policy:
+      require_justification: true
+      min_justification_length: 20
+
+  # Where to send approved data
+  post_sinks:
+    - type: webhook
+      url: "${CORE_BANKING_WEBHOOK_URL}"
+      headers:
+        X-Source: "doc-digitalization"
+        X-Pipeline: "covenant-compliance"
+
+    - type: webhook
+      url: "${NOTIFICATION_WEBHOOK_URL}"

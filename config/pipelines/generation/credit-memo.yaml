@@ -1,0 +1,281 @@
+# Credit Memo Generation Pipeline
+#
+# Generates credit memos for loan deals using data from
+# multiple sources including APIs, documents, and extraction results.
+
+generation_pipeline:
+  id: "credit-memo-generator"
+  name: "Credit Memo Generator"
+  description: "Generates comprehensive credit memos for loan approval"
+
+  # Output configuration
+  output:
+    format: docx
+    filename_template: "CreditMemo_{deal_id}_{date}.docx"
+    store_in_dms: true
+
+  # Data sources
+  data_sources:
+    deal_info:
+      type: api
+      endpoint: "https://core-banking.internal/api/deals/{deal_id}"
+      auth: oauth2
+
+    company_profile:
+      type: api
+      endpoint: "https://crm.internal/api/companies/{company_id}"
+      auth: oauth2
+
+    financials:
+      type: dms
+      document_types:
+        - financial_statement
+        - annual_report
+      extraction_schema: financials_schema
+
+    extracted_covenants:
+      type: extraction_pipeline
+      pipeline_id: "covenant-compliance"
+
+    industry_data:
+      type: api
+      endpoint: "https://market-data.internal/api/industries/{industry_code}"
+
+    supporting_docs:
+      type: dms
+      document_types:
+        - presentation
+        - due_diligence
+        - management_presentation
+
+  # Document template
+  template:
+    style:
+      tone: formal
+      perspective: third_person
+
+    sections:
+      - id: executive_summary
+        name: "Executive Summary"
+        instructions: |
+          Write a 2-3 paragraph executive summary covering:
+          - Deal overview (borrower, facility type, amount, purpose)
+          - Key strengths of the credit
+          - Key risks and mitigants
+          - Overall recommendation
+
+          Be concise and focus on the most important points.
+        data_sources:
+          - deal_info
+          - company_profile
+        data_points:
+          - id: borrower_name
+            description: "Legal name of the borrower"
+            sources: [deal_info, company_profile, financials]
+            validation: fuzzy_match
+            required: true
+          - id: facility_amount
+            description: "Total facility amount"
+            sources: [deal_info]
+            validation: numeric_exact
+            required: true
+          - id: facility_purpose
+            description: "Purpose of the facility"
+            sources: [deal_info]
+            validation: fuzzy_match
+            required: true
+        max_words: 300
+
+      - id: borrower_overview
+        name: "Borrower Overview"
+        instructions: |
+          Describe the borrower including:
+          - Business description and history
+          - Products/services and market position
+          - Industry overview
+          - Key management team
+          - Ownership structure
+
+          Cite specific sources when stating facts.
+        data_sources:
+          - company_profile
+          - industry_data
+          - supporting_docs
+        data_points:
+          - id: company_description
+            description: "Brief description of the company's business"
+            sources: [company_profile, supporting_docs]
+            validation: fuzzy_match
+            required: true
+          - id: year_founded
+            description: "Year the company was founded"
+            sources: [company_profile]
+            validation: numeric_exact
+            required: false
+          - id: headquarters
+            description: "Headquarters location"
+            sources: [company_profile]
+            validation: fuzzy_match
+            required: true
+          - id: employee_count
+            description: "Number of employees"
+            sources: [company_profile, financials, supporting_docs]
+            validation: numeric_tolerance
+            tolerance: 0.10
+            required: false
+          - id: industry_classification
+            description: "Industry/sector classification"
+            sources: [company_profile, industry_data]
+            validation: fuzzy_match
+            required: true
+        max_words: 500
+
+      - id: financial_analysis
+        name: "Financial Analysis"
+        instructions: |
+          Provide a comprehensive financial analysis.
+        subsections:
+          - id: historical_performance
+            name: "Historical Performance"
+            instructions: |
+              Analyze 3-year financial trends including:
+              - Revenue growth
+              - EBITDA and margins
+              - Net income
+              - Cash flow generation
+
+              Include a summary table of key metrics.
+            data_sources:
+              - financials
+            data_points:
+              - id: revenue_fy2023
+                description: "FY2023 Total Revenue"
+                sources: [financials]
+                validation: numeric_exact
+                unit: USD
+                required: true
+              - id: revenue_fy2022
+                description: "FY2022 Total Revenue"
+                sources: [financials]
+                validation: numeric_exact
+                unit: USD
+                required: true
+              - id: ebitda_fy2023
+                description: "FY2023 EBITDA"
+                sources: [financials]
+                validation: numeric_tolerance
+                tolerance: 0.02
+                required: true
+              - id: ebitda_margin_fy2023
+                description: "FY2023 EBITDA Margin"
+                sources: [financials]
+                validation: numeric_tolerance
+                tolerance: 0.01
+                required: true
+            include_tables: true
+
+          - id: covenant_compliance
+            name: "Covenant Compliance"
+            instructions: |
+              Summarize the current covenant compliance status:
+              - List each financial covenant
+              - Show current ratio vs. covenant threshold
+              - Calculate headroom/cushion
+              - Highlight any areas of concern
+            data_sources:
+              - extracted_covenants
+            data_points:
+              - id: leverage_ratio_current
+                description: "Current Debt/EBITDA ratio"
+                sources: [extracted_covenants, financials]
+                validation: numeric_tolerance
+                tolerance: 0.02
+                required: true
+              - id: leverage_ratio_covenant
+                description: "Maximum allowed leverage ratio"
+                sources: [extracted_covenants]
+                validation: numeric_exact
+                required: true
+              - id: interest_coverage_current
+                description: "Current interest coverage ratio"
+                sources: [extracted_covenants, financials]
+                validation: numeric_tolerance
+                tolerance: 0.02
+                required: true
+            include_tables: true
+        max_words: 600
+
+      - id: risk_assessment
+        name: "Risk Assessment"
+        instructions: |
+          Identify and assess key risks:
+
+          For each risk category, describe:
+          - The specific risk
+          - Likelihood and potential impact
+          - Mitigating factors
+
+          Categories to cover:
+          - Credit/Default Risk
+          - Industry/Market Risk
+          - Operational Risk
+          - Concentration Risk
+        data_sources:
+          - company_profile
+          - financials
+          - industry_data
+        max_words: 400
+
+      - id: deal_structure
+        name: "Deal Structure"
+        instructions: |
+          Describe the proposed deal structure:
+          - Facility type and amount
+          - Tenor and maturity
+          - Pricing (margin, fees)
+          - Security package
+          - Key covenants
+          - Conditions precedent
+        data_sources:
+          - deal_info
+        data_points:
+          - id: facility_type
+            description: "Type of credit facility"
+            sources: [deal_info]
+            validation: exact_match
+            required: true
+          - id: facility_tenor
+            description: "Tenor/term of the facility"
+            sources: [deal_info]
+            validation: exact_match
+            required: true
+          - id: pricing_margin
+            description: "Interest rate margin"
+            sources: [deal_info]
+            validation: numeric_exact
+            required: true
+        max_words: 400
+
+      - id: recommendation
+        name: "Recommendation"
+        instructions: |
+          Provide a clear recommendation:
+          - Approve / Approve with Conditions / Decline
+          - Key conditions (if any)
+          - Rationale for the recommendation
+          - Any special considerations
+
+          Be direct and decisive.
+        data_sources:
+          - deal_info
+        max_words: 200
+
+  # Workflow configuration
+  workflow:
+    review_required: true
+    reviewers:
+      - credit_analyst
+      - senior_analyst
+      - credit_committee
+    allow_section_regeneration: true
+    allow_inline_editing: true
