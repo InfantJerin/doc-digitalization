@@ -96,6 +96,19 @@ class LowConfidenceError(ExtractionError):
         )
 
 
+class AgentError(ExtractionError):
+    """Error raised by the Agent SDK orchestration layer."""
+    pass
+
+
+class AgentBudgetExceededError(AgentError):
+    """Agent exceeded configured turn or cost budgets."""
+    def __init__(self, pipeline_id: str, reason: str):
+        self.pipeline_id = pipeline_id
+        self.reason = reason
+        super().__init__(f"Agent budget exceeded for '{pipeline_id}': {reason}")
+
+
 # =============================================================================
 # Generation Errors
 # =============================================================================

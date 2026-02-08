@@ -272,6 +272,7 @@ class ExtractionRun:
     status: RunStatus = RunStatus.PENDING
     document_ids: list[str] = field(default_factory=list)
     extracted_fields: list[ExtractedField] = field(default_factory=list)
+    agent_session_id: Optional[str] = None
     triggered_by: str = ""  # "manual:user@example.com" or "rule:doc_arrival"
     created_at: datetime = field(default_factory=datetime.utcnow)
     completed_at: Optional[datetime] = None

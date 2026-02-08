@@ -1,134 +1,117 @@
-"""
-Extraction API Routes.
-"""
+"""Extraction API routes wired to AgentOrchestrator-backed service."""
 
-from typing import Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks
-from pydantic import BaseModel
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException
+
+from ...core.schemas import ExtractionCreateRequest, ExtractionCreateResponse
+from ...core.models import RunStatus
+from ..dependencies import get_extraction_service
+from ...extraction.service import ExtractionService
 
 router = APIRouter()
 
 
-class ExtractionRequest(BaseModel):
-    """Request to trigger an extraction."""
-    deal_id: str
-    pipeline_id: str
-    document_ids: list[str]
-    triggered_by: str
-
-
-class ExtractionResponse(BaseModel):
-    """Response from extraction trigger."""
-    run_id: str
-    status: str
-    message: str
-
-
-@router.post("", response_model=ExtractionResponse)
+@router.post("", response_model=ExtractionCreateResponse)
 async def trigger_extraction(
-    request: ExtractionRequest,
-    background_tasks: BackgroundTasks
+    request: ExtractionCreateRequest,
+    service: ExtractionService = Depends(get_extraction_service),
 ):
-    """
-    Trigger an extraction pipeline for a deal.
-
-    The extraction runs asynchronously. Use GET /extractions/{run_id}
-    to check status and retrieve results.
-    """
-    from ...extraction.service import ExtractionService
-
-    service = ExtractionService()
-
     try:
         run = await service.run_extraction(
             deal_id=request.deal_id,
             pipeline_id=request.pipeline_id,
             document_ids=request.document_ids,
-            triggered_by=request.triggered_by
+            triggered_by=request.triggered_by,
         )
-
-        return ExtractionResponse(
+        return ExtractionCreateResponse(
             run_id=run.id,
             status=run.status.value,
-            message="Extraction completed successfully"
+            message="Extraction completed" if run.status != RunStatus.FAILED else "Extraction failed",
         )
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/{run_id}")
-async def get_extraction_run(run_id: str):
-    """Get details of an extraction run."""
-    from ...extraction.service import ExtractionService
-
-    service = ExtractionService()
-
-    try:
-        run = await service.get_extraction_run(run_id)
-        return {
-            "run_id": run.id,
-            "deal_id": run.deal_id,
-            "pipeline_id": run.pipeline_id,
-            "version": run.version,
-            "status": run.status.value,
-            "document_ids": run.document_ids,
-            "extracted_fields": [
-                {
-                    "field_path": f.field_path,
-                    "value": f.value,
-                    "confidence": f.confidence,
-                    "citation": {
-                        "document_id": f.citation.document_id,
-                        "page": f.citation.page_number,
-                        "text": f.citation.extracted_text
-                    } if f.citation else None
+async def get_extraction_run(
+    run_id: str,
+    service: ExtractionService = Depends(get_extraction_service),
+):
+    run = await service.get_extraction_run(run_id)
+    return {
+        "run_id": run.id,
+        "deal_id": run.deal_id,
+        "pipeline_id": run.pipeline_id,
+        "version": run.version,
+        "status": run.status.value,
+        "document_ids": run.document_ids,
+        "agent_session_id": run.agent_session_id,
+        "extracted_fields": [
+            {
+                "field_path": field.field_path,
+                "value": field.override_value if field.overridden else field.value,
+                "confidence": field.confidence,
+                "citation": {
+                    "document_id": field.citation.document_id,
+                    "page": field.citation.page_number,
+                    "text": field.citation.extracted_text,
                 }
-                for f in run.extracted_fields
-            ],
-            "created_at": run.created_at.isoformat(),
-            "completed_at": run.completed_at.isoformat() if run.completed_at else None
-        }
-
-    except NotImplementedError:
-        raise HTTPException(status_code=501, detail="Database integration pending")
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
+                if field.citation
+                else None,
+                "overridden": field.overridden,
+                "override_value": field.override_value,
+            }
+            for field in run.extracted_fields
+        ],
+        "metadata": run.metadata,
+        "created_at": run.created_at.isoformat(),
+        "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+        "error_message": run.error_message,
+    }
 
 
 @router.get("")
 async def list_extractions(
-    deal_id: Optional[str] = None,
-    pipeline_id: Optional[str] = None,
+    deal_id: str,
+    pipeline_id: str | None = None,
     limit: int = 50,
-    offset: int = 0
+    offset: int = 0,
+    service: ExtractionService = Depends(get_extraction_service),
 ):
-    """List extraction runs with optional filters."""
-    # TODO: Implement database query
+    runs = await service.list_extractions_for_deal(
+        deal_id=deal_id,
+        pipeline_id=pipeline_id,
+        limit=limit,
+        offset=offset,
+    )
     return {
-        "extractions": [],
-        "total": 0,
+        "extractions": [
+            {
+                "run_id": run.id,
+                "pipeline_id": run.pipeline_id,
+                "version": run.version,
+                "status": run.status.value,
+                "created_at": run.created_at.isoformat(),
+                "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+            }
+            for run in runs
+        ],
+        "count": len(runs),
         "limit": limit,
-        "offset": offset
+        "offset": offset,
     }
 
 
 @router.post("/{run_id}/rerun")
-async def rerun_extraction(run_id: str, triggered_by: str):
-    """Re-run an extraction, creating a new revision."""
-    from ...extraction.service import ExtractionService
-
-    service = ExtractionService()
-
-    try:
-        new_run = await service.rerun_extraction(run_id, triggered_by)
-        return {
-            "run_id": new_run.id,
-            "version": new_run.version,
-            "status": new_run.status.value
-        }
-
-    except NotImplementedError:
-        raise HTTPException(status_code=501, detail="Database integration pending")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def rerun_extraction(
+    run_id: str,
+    triggered_by: str,
+    service: ExtractionService = Depends(get_extraction_service),
+):
+    run = await service.rerun_extraction(run_id, triggered_by)
+    return {
+        "run_id": run.id,
+        "version": run.version,
+        "status": run.status.value,
+    }

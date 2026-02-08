@@ -46,6 +46,15 @@ from .config_loader import (
     load_extraction_config,
     load_generation_config,
 )
+from .schemas import (
+    CitationOutput,
+    ExtractedFieldOutput,
+    ExtractionResultOutput,
+    ExtractionCreateRequest,
+    ExtractionCreateResponse,
+    HealthStatus,
+)
+from .settings import Settings, get_settings
 
 from .exceptions import (
     DocDigitalizationError,
@@ -61,6 +70,8 @@ from .exceptions import (
     StructureExtractionError,
     FieldExtractionError,
     LowConfidenceError,
+    AgentError,
+    AgentBudgetExceededError,
     GenerationError,
     DataGatheringError,
     DataPointConflictError,
@@ -118,6 +129,14 @@ __all__ = [
     "get_config_loader",
     "load_extraction_config",
     "load_generation_config",
+    "CitationOutput",
+    "ExtractedFieldOutput",
+    "ExtractionResultOutput",
+    "ExtractionCreateRequest",
+    "ExtractionCreateResponse",
+    "HealthStatus",
+    "Settings",
+    "get_settings",
     # Exceptions
     "DocDigitalizationError",
     "ConfigurationError",
@@ -132,6 +151,8 @@ __all__ = [
     "StructureExtractionError",
     "FieldExtractionError",
     "LowConfidenceError",
+    "AgentError",
+    "AgentBudgetExceededError",
     "GenerationError",
     "DataGatheringError",
     "DataPointConflictError",

@@ -1,7 +1,6 @@
 version: '3.8'
 
 services:
-  # Main API Service
   api:
     build:
       context: .
@@ -10,17 +9,19 @@ services:
       - "8000:8000"
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - AGENT_MODEL=${AGENT_MODEL:-claude-sonnet-4-20250514}
+      - AGENT_PERMISSION_MODE=${AGENT_PERMISSION_MODE:-bypassPermissions}
       - DMS_BASE_URL=http://dms:8080
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/doc_digitalization
-      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@db:5432/doc_digitalization}
+      - EXTRACTIONS_ROOT=/tmp/extractions
     depends_on:
       - db
-      - redis
+      - dms
     volumes:
       - ./config:/app/config:ro
+      - ./skills:/app/skills:ro
       - ./src:/app/src:ro
 
-  # PostgreSQL Database
   db:
     image: postgres:15-alpine
     environment:
@@ -32,35 +33,13 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-  # Redis Cache
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-
-  # Mock DMS Service (for local development)
   dms:
     image: python:3.11-slim
     command: python -m http.server 8080
     ports:
       - "8080:8080"
     volumes:
-      - ./test_documents:/app/documents
-
-  # LocalStack for S3 (optional - for local AWS simulation)
-  localstack:
-    image: localstack/localstack:latest
-    ports:
-      - "4566:4566"
-    environment:
-      - SERVICES=s3
-      - DEFAULT_REGION=us-east-1
-    volumes:
-      - localstack_data:/var/lib/localstack
+      - ./resources:/app/resources:ro
 
 volumes:
   postgres_data:
-  redis_data:
-  localstack_data:

@@ -6,11 +6,12 @@ from YAML files in the config/pipelines directory.
 """
 
 import os
+import re
 from pathlib import Path
 from typing import Optional
 import yaml
 from dataclasses import dataclass, field
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from enum import Enum
 
 
@@ -67,11 +68,25 @@ class ManualTriggerConfig(BaseModel):
     roles: list[str] = Field(default_factory=lambda: ["loan_ops"])
 
 
+class ApiTriggerConfig(BaseModel):
+    """Configuration for API triggering."""
+    enabled: bool = True
+
+
 class TriggersConfig(BaseModel):
     """Configuration for all trigger types."""
     manual: ManualTriggerConfig = Field(default_factory=ManualTriggerConfig)
     rules: list[TriggerRuleConfig] = Field(default_factory=list)
-    api: bool = True
+    api: ApiTriggerConfig = Field(default_factory=ApiTriggerConfig)
+
+    @field_validator("api", mode="before")
+    @classmethod
+    def normalize_api(cls, value):
+        if isinstance(value, bool):
+            return {"enabled": value}
+        if isinstance(value, dict):
+            return value
+        return {"enabled": True}
 
 
 class FieldSchemaConfig(BaseModel):
@@ -84,6 +99,7 @@ class FieldSchemaConfig(BaseModel):
     sources: list[str] = Field(default_factory=list)
     required: bool = True
     cross_validate: bool = False
+    skill: Optional[str] = None
 
 
 class LargeDocumentConfig(BaseModel):
@@ -312,6 +328,31 @@ class ConfigLoader:
         """Clear caches and force reload on next access."""
         self._extraction_cache.clear()
         self._generation_cache.clear()
+
+    def resolve_field_skill_name(
+        self,
+        field_name: str,
+        field_config: Optional[FieldSchemaConfig] = None,
+    ) -> str:
+        """
+        Resolve the canonical skill name for a field.
+
+        Fields can override via `skill` in YAML. Otherwise we use the
+        field path converted to hyphen-case.
+        """
+        if field_config and field_config.skill:
+            return field_config.skill.strip()
+
+        normalized = re.sub(r"[^a-zA-Z0-9]+", "-", field_name).strip("-")
+        return normalized.lower()
+
+    def list_extraction_skill_names(self, pipeline_id: str) -> dict[str, str]:
+        """Return map of field path -> resolved skill name for a pipeline."""
+        config = self.load_extraction_pipeline(pipeline_id)
+        return {
+            field_name: self.resolve_field_skill_name(field_name, field_config)
+            for field_name, field_config in config.extraction_schema.items()
+        }
 
 
 # Global config loader instance
