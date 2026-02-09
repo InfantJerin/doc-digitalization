@@ -54,6 +54,7 @@ extraction_use_case:
     covenant_period:
       type: object
       description: "The period covered by this compliance certificate"
+      field_strategy: direct
       properties:
         start_date:
           type: date
@@ -71,6 +72,7 @@ extraction_use_case:
     leverage_ratio:
       type: object
       description: "Debt to EBITDA ratio covenant"
+      field_strategy: cross_validate
       properties:
         current_ratio:
           type: number
@@ -91,6 +93,7 @@ extraction_use_case:
     interest_coverage_ratio:
       type: object
       description: "Interest coverage ratio covenant"
+      field_strategy: skill
       properties:
         current_ratio:
           type: number
@@ -106,6 +109,7 @@ extraction_use_case:
     minimum_liquidity:
       type: object
       description: "Minimum liquidity covenant"
+      field_strategy: cross_validate
       properties:
         current_amount:
           type: number
@@ -125,6 +129,7 @@ extraction_use_case:
     compliance_status:
       type: string
       description: "Overall compliance status"
+      field_strategy: skill
       enum:
         - COMPLIANT
         - BREACH
@@ -139,6 +144,7 @@ extraction_use_case:
     certification_date:
       type: date
       description: "Date the certificate was signed"
+      field_strategy: direct
       likely_sections:
         - "Signature"
         - "Certification"
@@ -148,6 +154,7 @@ extraction_use_case:
     certifying_officer:
       type: object
       description: "Officer who signed the certificate"
+      field_strategy: direct
       properties:
         name:
           type: string

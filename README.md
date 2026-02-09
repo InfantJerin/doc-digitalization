@@ -1,192 +1,225 @@
 # Document Digitalization Platform
 
-A platform for extracting structured data from documents and generating documents from templates and multiple data sources.
+Agent-first platform for document extraction and document generation, with a skills-based extraction architecture, model-agnostic LLM integrations, and review workflow support.
 
-## Features
+## What Changed
 
-### Extraction Pipeline
-- **Single and Multi-Document Extraction**: Extract data from one or multiple related documents
-- **Large Document Handling**: Hierarchical structure detection for documents 100+ pages
-- **Citation Tracking**: Link every extracted value to its source (page, location)
-- **Maker-Checker Workflow**: Review, attest, and override extracted values
-- **Revision History**: Track changes across versions
+This codebase now includes:
 
-### Generation Pipeline
-- **Template-Based Generation**: Define document structure via YAML
-- **Multi-Source Data**: Gather data from APIs, documents, databases
-- **Data Point Validation**: Cross-validate facts across sources, flag conflicts
-- **Section Regeneration**: Regenerate individual sections with feedback
+- Hybrid extraction strategy per field (`direct`, `skill`, `cross_validate`)
+- Skills library under `skills/` with orchestrator/structure/field/citation skills
+- Model-agnostic LLM runtime (`openai_compatible`, `litellm`, `anthropic`)
+- OpenAI API-spec compatible integration with configurable `base_url`
+- Agent orchestration layer under `src/agent/`
+- Repository-backed persistence layer under `src/database/`
+- Health/readiness API endpoints
 
-## Quick Start
+## Core Capabilities
 
-### Prerequisites
-- Python 3.11+
-- Docker & Docker Compose (optional, for local infrastructure)
+### Extraction
 
-### Installation
+- Config-driven extraction from `config/pipelines/extraction/*.yaml`
+- Page-index-first retrieval for large documents
+- Field-level routing strategy:
+  - `direct`: structured extraction for simple fields
+  - `skill`: skill-guided extraction for complex/high-risk fields
+  - `cross_validate`: multi-document reconciliation
+- Citation enrichment with quote and bounding box support
 
-```bash
-# Clone the repository
-git clone <repository-url>
-cd doc-digitalization
+### Generation
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+- Template-based generation from `config/pipelines/generation/*.yaml`
+- Data gathering + cross-source validation for data points
+- Section-level generation/regeneration
 
-# Install dependencies
-pip install -r requirements.txt
+### Workflow
 
-# Set environment variables
-export ANTHROPIC_API_KEY="your-api-key"
-```
-
-### Running Locally
-
-```bash
-# Start the API server
-uvicorn src.api.app:app --reload
-
-# Or with Docker Compose
-docker-compose up -d
-```
-
-### API Documentation
-
-Once running, visit:
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
-
-## Configuration
-
-Pipelines are configured via YAML files in `config/pipelines/`:
-
-### Extraction Pipeline Example
-
-```yaml
-extraction_use_case:
-  id: "covenant-compliance"
-  name: "Covenant Compliance Extraction"
-
-  document_types:
-    - type: compliance_certificate
-      required: true
-
-  extraction_schema:
-    leverage_ratio:
-      type: object
-      properties:
-        current_ratio: { type: number }
-        covenant_max: { type: number }
-      likely_sections: ["Financial Covenants"]
-```
-
-### Generation Pipeline Example
-
-```yaml
-generation_pipeline:
-  id: "credit-memo-generator"
-  name: "Credit Memo Generator"
-
-  data_sources:
-    deal_info:
-      type: api
-      endpoint: "https://api/deals/{deal_id}"
-
-  template:
-    sections:
-      - id: executive_summary
-        name: "Executive Summary"
-        instructions: "Write a summary..."
-        data_points:
-          - id: borrower_name
-            sources: [deal_info]
-            validation: fuzzy_match
-```
-
-## Architecture
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     API Layer (FastAPI)                          │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌─────────────────┐           ┌─────────────────┐              │
-│  │   Extraction    │           │   Generation    │              │
-│  │    Service      │           │    Service      │              │
-│  └────────┬────────┘           └────────┬────────┘              │
-│           │                             │                        │
-│           └──────────┬──────────────────┘                        │
-│                      │                                           │
-│           ┌──────────┴──────────┐                               │
-│           │  Workflow Service   │                               │
-│           │  (Maker-Checker)    │                               │
-│           └─────────────────────┘                               │
-│                                                                  │
-├─────────────────────────────────────────────────────────────────┤
-│  Integrations: DMS | Claude | Webhooks                          │
-└─────────────────────────────────────────────────────────────────┘
-```
+- Review tasks and attestations
+- Override support with justification
+- Status lifecycle (`processing`, `awaiting_review`, `approved`, etc.)
 
 ## Project Structure
 
-```
+```text
 doc-digitalization/
 ├── config/
 │   └── pipelines/
-│       ├── extraction/     # Extraction pipeline configs
-│       └── generation/     # Generation pipeline configs
+│       ├── extraction/
+│       └── generation/
+├── skills/
+│   ├── extraction-orchestrator/
+│   ├── structure-analyzer/
+│   ├── field-extractors/
+│   └── citation-builder/
 ├── src/
-│   ├── core/               # Models, config, exceptions
-│   ├── extraction/         # Extraction pipeline
-│   ├── generation/         # Generation pipeline
-│   ├── workflow/           # Review workflow
-│   ├── integrations/       # External services
-│   └── api/                # FastAPI routes
-├── docs/                   # Documentation
-├── tests/                  # Test suite
-└── infrastructure/         # Terraform, K8s configs
+│   ├── agent/
+│   ├── api/
+│   ├── core/
+│   ├── database/
+│   ├── extraction/
+│   ├── generation/
+│   ├── integrations/
+│   ├── tools/
+│   ├── workers/
+│   └── workflow/
+├── tests/
+└── pyproject.toml
 ```
 
-## API Endpoints
+## Local Setup
 
-### Extraction
-- `POST /api/v1/extractions` - Trigger extraction
-- `GET /api/v1/extractions/{run_id}` - Get extraction results
-- `POST /api/v1/extractions/{run_id}/rerun` - Re-run extraction
+### Prerequisites
 
-### Generation
-- `POST /api/v1/generations` - Trigger generation
-- `GET /api/v1/generations/{run_id}` - Get generation results
-- `POST /api/v1/generations/{run_id}/sections/{section_id}/regenerate` - Regenerate section
-- `GET /api/v1/generations/{run_id}/download` - Download document
+- Python 3.11+
+- Docker (optional)
 
-### Review
-- `GET /api/v1/reviews` - List review tasks
-- `GET /api/v1/reviews/{task_id}` - Get review data
-- `POST /api/v1/reviews/{task_id}/attest` - Submit attestation
-
-## Development
+### Install
 
 ```bash
-# Run tests
-pytest
+git clone <repository-url>
+cd doc-digitalization
 
-# Run with coverage
-pytest --cov=src
+python -m venv .venv
+source .venv/bin/activate
 
-# Type checking
-mypy src
-
-# Linting
-ruff check src
-
-# Formatting
-black src
-isort src
+pip install -U pip
+pip install -e ".[dev]"
 ```
+
+Optional provider packages:
+
+```bash
+# Claude Agent SDK extras (optional)
+pip install -e ".[agent-sdk]"
+```
+
+### Environment
+
+Create `.env` from `.env.example`:
+
+```bash
+cp .env.example .env
+```
+
+Minimum fields to set depend on provider.
+
+#### OpenAI-compatible endpoint (recommended)
+
+```env
+LLM_PROVIDER=openai_compatible
+LLM_API_BASE=https://your-openai-compatible-endpoint/v1
+LLM_API_KEY=your-key
+AGENT_MODEL=gpt-4.1-mini
+```
+
+#### LiteLLM
+
+```env
+LLM_PROVIDER=litellm
+LLM_API_BASE=
+LLM_API_KEY=your-key
+AGENT_MODEL=<provider-model-id>
+```
+
+#### Anthropic
+
+```env
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=your-key
+AGENT_MODEL=claude-sonnet-4-20250514
+```
+
+## Run
+
+### API
+
+```bash
+uvicorn src.api.app:app --reload --host 0.0.0.0 --port 8000
+```
+
+### Worker (optional)
+
+```bash
+python -m src.workers.extraction_worker
+```
+
+### Docker Compose
+
+```bash
+docker compose up --build
+```
+
+## API Docs and Health
+
+- Swagger: `http://localhost:8000/docs`
+- Health: `http://localhost:8000/api/v1/health`
+- Readiness: `http://localhost:8000/api/v1/health/readiness`
+
+## Extraction Strategy Configuration
+
+Example field config with strategy:
+
+```yaml
+extraction_schema:
+  borrower:
+    type: object
+    field_strategy: direct
+    likely_sections: ["Preamble", "Definitions"]
+
+  financial_covenants:
+    type: array
+    field_strategy: skill
+    likely_sections: ["Financial Covenants", "Article VII"]
+
+  amendment_threshold:
+    type: object
+    field_strategy: cross_validate
+    cross_validate: true
+```
+
+If `field_strategy` is omitted, defaults are:
+
+1. `cross_validate` when `cross_validate: true`
+2. `skill` when explicit `skill` is configured
+3. otherwise `direct`
+
+## Tests
+
+```bash
+python -m pytest
+```
+
+Targeted suites:
+
+```bash
+python -m pytest tests/unit
+python -m pytest tests/skills
+python -m pytest tests/integration
+```
+
+## Smoke Test (Sample Credit Agreement)
+
+You can run a real extraction smoke test directly against the sample PDF in `resources/`.
+
+```bash
+python scripts/smoke_test_extraction.py \
+  --pipeline-id credit-agreement \
+  --document-path "resources/credit agreement/AbbieVie Term Loan Credit Agreement.pdf" \
+  --output /tmp/smoke_extraction_output.json
+```
+
+What this does:
+
+- Runs `ExtractionService` end-to-end
+- Uses a local file-backed DMS adapter (no external DMS required)
+- Prints JSON result to stdout
+- Optionally writes output JSON to the path passed in `--output`
+
+## Notes
+
+- `skills/` files are validated via tests (`tests/skills/test_skill_format.py`).
+- Agent orchestration is provider-agnostic through `src/integrations/llm_factory.py`.
+- OpenAI-spec format is supported through `openai_compatible` mode and `LLM_API_BASE`.
 
 ## License
 

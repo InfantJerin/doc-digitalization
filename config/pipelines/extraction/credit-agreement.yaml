@@ -42,6 +42,7 @@ extraction_use_case:
     borrower:
       type: object
       description: "The borrower/obligor under the agreement"
+      field_strategy: direct
       properties:
         legal_name:
           type: string
@@ -58,6 +59,7 @@ extraction_use_case:
     administrative_agent:
       type: object
       description: "The administrative agent"
+      field_strategy: direct
       properties:
         name:
           type: string
@@ -72,6 +74,7 @@ extraction_use_case:
     facility_type:
       type: string
       description: "Type of credit facility"
+      field_strategy: skill
       enum: ["term_loan", "revolving", "delayed_draw", "multi_tranche"]
       likely_sections:
         - "Definitions"
@@ -81,6 +84,7 @@ extraction_use_case:
     total_commitment:
       type: object
       description: "Total commitment amount"
+      field_strategy: direct
       properties:
         amount:
           type: number
@@ -94,6 +98,7 @@ extraction_use_case:
     maturity_date:
       type: date
       description: "Final maturity date of the facility"
+      field_strategy: direct
       likely_sections:
         - "Definitions"
         - "Article II"
@@ -102,6 +107,7 @@ extraction_use_case:
     interest_rate:
       type: object
       description: "Interest rate provisions"
+      field_strategy: skill
       properties:
         base_rate_margin:
           type: number
@@ -118,6 +124,7 @@ extraction_use_case:
     financial_covenants:
       type: array
       description: "List of financial covenants"
+      field_strategy: skill
       items:
         type: object
         properties:
@@ -138,6 +145,7 @@ extraction_use_case:
     closing_date:
       type: date
       description: "Closing date of the agreement"
+      field_strategy: direct
       likely_sections:
         - "Preamble"
         - "Definitions"
@@ -147,6 +155,7 @@ extraction_use_case:
     amendment_threshold:
       type: object
       description: "Thresholds for amending the agreement"
+      field_strategy: cross_validate
       properties:
         required_lenders_percentage:
           type: number

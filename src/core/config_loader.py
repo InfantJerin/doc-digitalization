@@ -35,6 +35,12 @@ class ValidationTypeConfig(str, Enum):
     STRUCTURED_MATCH = "structured_match"
 
 
+class FieldStrategyConfig(str, Enum):
+    DIRECT = "direct"
+    SKILL = "skill"
+    CROSS_VALIDATE = "cross_validate"
+
+
 class DataSourceType(str, Enum):
     API = "api"
     DMS = "dms"
@@ -100,6 +106,7 @@ class FieldSchemaConfig(BaseModel):
     required: bool = True
     cross_validate: bool = False
     skill: Optional[str] = None
+    field_strategy: Optional[FieldStrategyConfig] = None
 
 
 class LargeDocumentConfig(BaseModel):
