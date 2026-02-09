@@ -8,10 +8,12 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - LLM_PROVIDER=${LLM_PROVIDER:-anthropic}
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai_compatible}
+      - LLM_API_BASE=${LLM_API_BASE}
+      - LLM_API_KEY=${LLM_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - AGENT_MODEL=${AGENT_MODEL:-claude-sonnet-4-20250514}
+      - AGENT_MODEL=${AGENT_MODEL:-gpt-4.1-mini}
       - AGENT_PERMISSION_MODE=${AGENT_PERMISSION_MODE:-bypassPermissions}
       - DMS_BASE_URL=http://dms:8080
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://postgres:postgres@db:5432/doc_digitalization}

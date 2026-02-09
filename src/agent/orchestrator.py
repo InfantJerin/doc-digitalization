@@ -14,7 +14,6 @@ from ..core.settings import Settings, get_settings
 from ..extraction.citation_builder import CitationBuilder
 from ..extraction.field_extractor import FieldExtractor
 from ..extraction.structure_extractor import DocumentStructureExtractor
-from ..integrations.claude_client import ClaudeClient
 from ..integrations.llm_base import LLMClientProtocol
 from ..integrations.llm_factory import get_llm_client
 from .budget import BudgetTracker, budget_for_pipeline
@@ -25,15 +24,6 @@ from .skill_registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
 
-try:  # pragma: no cover - optional runtime dependency
-    import claude_agent_sdk  # type: ignore
-
-    CLAUDE_AGENT_SDK_AVAILABLE = True
-except ImportError:  # pragma: no cover
-    claude_agent_sdk = None
-    CLAUDE_AGENT_SDK_AVAILABLE = False
-
-
 @dataclass(slots=True)
 class AgentOrchestratorResult:
     output: ExtractionResultOutput
@@ -42,11 +32,10 @@ class AgentOrchestratorResult:
 
 class AgentOrchestrator:
     """
-    Orchestrates extraction execution through Claude Agent SDK.
+    Orchestrates extraction execution through a model-agnostic LLM runtime.
 
-    Current behavior:
-    - Uses SDK runtime when available.
-    - Falls back to legacy extraction path when SDK package is not installed.
+    The execution path is provider-neutral and uses configured LLM client
+    implementations (OpenAI-compatible, LiteLLM, or Anthropic).
     """
 
     def __init__(
@@ -59,7 +48,6 @@ class AgentOrchestrator:
         prompt_builder: Optional[PromptBuilder] = None,
         result_parser: Optional[ResultParser] = None,
         llm_client: Optional[LLMClientProtocol] = None,
-        claude_client: Optional[ClaudeClient] = None,
     ):
         self.settings = settings or get_settings()
         self.config_loader = config_loader or ConfigLoader(str(self.settings.config_dir))
@@ -67,7 +55,7 @@ class AgentOrchestrator:
         self.session_manager = session_manager or SessionManager()
         self.prompt_builder = prompt_builder or PromptBuilder(self.skill_registry)
         self.result_parser = result_parser or ResultParser()
-        self.llm_client = llm_client or claude_client or get_llm_client(self.settings)
+        self.llm_client = llm_client or get_llm_client(self.settings)
 
         # Transitional fallback components.
         self._legacy_field_extractor = FieldExtractor(claude_client=self.llm_client)
@@ -97,22 +85,14 @@ class AgentOrchestrator:
             field_skill_names=field_skill_names,
         )
 
-        if CLAUDE_AGENT_SDK_AVAILABLE:
-            output = await self._run_sdk(
-                session_id=session.session_id,
-                prompt=prompt,
-                config=config,
-                document_paths=document_paths,
-                budget=budget,
-                field_skill_names=field_skill_names,
-            )
-        else:
-            output = await self._run_legacy_fallback(
-                session_id=session.session_id,
-                config=config,
-                document_paths=document_paths,
-                budget=budget,
-            )
+        output = await self._run_sdk(
+            session_id=session.session_id,
+            prompt=prompt,
+            config=config,
+            document_paths=document_paths,
+            budget=budget,
+            field_skill_names=field_skill_names,
+        )
 
         self.session_manager.save(
             session,
@@ -135,33 +115,17 @@ class AgentOrchestrator:
         field_skill_names: dict[str, str],
     ) -> ExtractionResultOutput:
         """
-        Agent SDK execution path.
+        Main orchestrator execution path.
 
-        This path is intentionally conservative until the SDK runtime package is
-        finalized in deployment environments. It emits config-driven defaults if
-        the SDK call fails.
+        This function executes extraction across provided documents and returns
+        merged structured fields. It is intentionally provider-agnostic and
+        operates with whichever LLM client was selected in settings.
         """
-        budget.record_turn()
-
-        try:
-            # Placeholder until Claude Agent SDK API bindings are finalized.
-            # Keep prompt/workspace artifacts for observability and fallback.
-            _ = claude_agent_sdk
-            logger.info("Claude Agent SDK available; using guarded fallback execution")
-        except Exception:
-            logger.exception("Agent SDK runtime call failed, falling back to defaults")
-
-        return self._default_output(config=config, session_id=session_id)
-
-    async def _run_legacy_fallback(
-        self,
-        *,
-        session_id: str,
-        config: ExtractionPipelineConfig,
-        document_paths: list[Path],
-        budget: BudgetTracker,
-    ) -> ExtractionResultOutput:
-        logger.info("Running legacy extraction fallback for pipeline %s", config.id)
+        logger.info(
+            "Running provider-agnostic orchestrator path for pipeline=%s provider=%s",
+            config.id,
+            self.settings.llm_provider,
+        )
         aggregated: dict[str, ExtractedFieldOutput] = {}
 
         for document_path in document_paths:
@@ -215,7 +179,7 @@ class AgentOrchestrator:
 
         return ExtractionResultOutput(
             fields=sorted(aggregated.values(), key=lambda item: item.field_path),
-            extraction_notes=["legacy_fallback_executed"],
+            extraction_notes=["provider_agnostic_runtime_executed"],
             agent_session_id=session_id,
         )
 
@@ -238,7 +202,7 @@ class AgentOrchestrator:
             ],
             extraction_notes=[
                 "agent_runtime_default_output",
-                "configure Claude Agent SDK runtime for autonomous extraction",
+                "no fields extracted from provided documents",
             ],
             agent_session_id=session_id,
         )

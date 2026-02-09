@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     llm_provider: str = "anthropic"
+    llm_api_base: str = ""
+    llm_api_key: str = ""
+    llm_timeout_seconds: int = 120
     anthropic_api_key: str = ""
     openai_api_key: str = ""
     agent_model: str = "claude-sonnet-4-20250514"

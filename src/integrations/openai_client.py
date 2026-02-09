@@ -28,15 +28,20 @@ class OpenAIClient:
     def __init__(
         self,
         api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
         model: str = "gpt-4.1-mini",
         max_retries: int = 3,
     ):
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
+        self.api_key = api_key or os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY", "")
+        self.base_url = base_url or os.getenv("LLM_API_BASE", "")
         self.model = model
         self.max_retries = max_retries
 
         if OPENAI_AVAILABLE and self.api_key:
-            self.client = OpenAI(api_key=self.api_key)
+            kwargs = {"api_key": self.api_key}
+            if self.base_url:
+                kwargs["base_url"] = self.base_url
+            self.client = OpenAI(**kwargs)
         else:
             self.client = None
             if not OPENAI_AVAILABLE:

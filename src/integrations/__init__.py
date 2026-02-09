@@ -9,6 +9,7 @@ Contains clients for external services:
 
 from .dms_client import DMSClient
 from .claude_client import ClaudeClient
+from .litellm_client import LiteLLMClient
 from .openai_client import OpenAIClient
 from .llm_factory import get_llm_client
 from .webhook_client import WebhookClient
@@ -16,6 +17,7 @@ from .webhook_client import WebhookClient
 __all__ = [
     "DMSClient",
     "ClaudeClient",
+    "LiteLLMClient",
     "OpenAIClient",
     "get_llm_client",
     "WebhookClient",
