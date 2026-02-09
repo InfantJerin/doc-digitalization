@@ -23,7 +23,8 @@ except ImportError:
 
 from ..core.models import DocumentNode, DocumentStructure, ExtractionMode
 from ..core.exceptions import StructureExtractionError, DocumentProcessingError
-from ..integrations.claude_client import ClaudeClient
+from ..integrations.llm_base import LLMClientProtocol
+from ..integrations.llm_factory import get_llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +47,10 @@ class DocumentStructureExtractor:
 
     def __init__(
         self,
-        claude_client: Optional[ClaudeClient] = None,
+        claude_client: Optional[LLMClientProtocol] = None,
         config: Optional[StructureExtractionConfig] = None
     ):
-        self.claude_client = claude_client or ClaudeClient()
+        self.claude_client = claude_client or get_llm_client()
         self.config = config or StructureExtractionConfig()
 
         if fitz is None:

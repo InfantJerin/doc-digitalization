@@ -22,7 +22,9 @@ class Settings(BaseSettings):
     environment: str = "dev"
     log_level: str = "INFO"
 
+    llm_provider: str = "anthropic"
     anthropic_api_key: str = ""
+    openai_api_key: str = ""
     agent_model: str = "claude-sonnet-4-20250514"
     agent_permission_mode: str = "bypassPermissions"
 

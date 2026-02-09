@@ -1,0 +1,16 @@
+from src.core.settings import Settings
+from src.integrations.claude_client import ClaudeClient
+from src.integrations.llm_factory import get_llm_client
+from src.integrations.openai_client import OpenAIClient
+
+
+def test_llm_factory_returns_openai_client_when_configured():
+    settings = Settings(llm_provider="openai", openai_api_key="test", agent_model="gpt-4.1-mini")
+    client = get_llm_client(settings)
+    assert isinstance(client, OpenAIClient)
+
+
+def test_llm_factory_defaults_to_claude_client():
+    settings = Settings(llm_provider="anthropic", anthropic_api_key="test")
+    client = get_llm_client(settings)
+    assert isinstance(client, ClaudeClient)

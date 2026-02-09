@@ -4,11 +4,11 @@ Claude Client.
 Wrapper for the Anthropic Claude API.
 """
 
-import json
 import logging
 import os
-import re
-from typing import Optional, Any
+from typing import Optional
+
+from .llm_base import parse_json_response
 
 logger = logging.getLogger(__name__)
 
@@ -122,31 +122,7 @@ class ClaudeClient:
 
     def _parse_json(self, text: str) -> dict:
         """Parse JSON from Claude's response."""
-        if not text:
-            return {}
-
-        try:
-            # Try direct parse
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-
-        # Try to find JSON in response
-        try:
-            # Look for JSON block
-            json_match = re.search(r'```json\s*([\s\S]*?)\s*```', text)
-            if json_match:
-                return json.loads(json_match.group(1))
-
-            # Look for any JSON object
-            json_match = re.search(r'\{[\s\S]*\}', text)
-            if json_match:
-                return json.loads(json_match.group())
-
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse JSON from response: {e}")
-
-        return {}
+        return parse_json_response(text)
 
     async def query_with_image(
         self,

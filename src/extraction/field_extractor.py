@@ -24,7 +24,8 @@ from ..core.models import (
 )
 from ..core.config_loader import ExtractionPipelineConfig, FieldSchemaConfig
 from ..core.exceptions import FieldExtractionError
-from ..integrations.claude_client import ClaudeClient
+from ..integrations.llm_base import LLMClientProtocol
+from ..integrations.llm_factory import get_llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +45,8 @@ class FieldExtractor:
     Uses batch extraction for efficiency.
     """
 
-    def __init__(self, claude_client: Optional[ClaudeClient] = None):
-        self.claude_client = claude_client or ClaudeClient()
+    def __init__(self, claude_client: Optional[LLMClientProtocol] = None):
+        self.claude_client = claude_client or get_llm_client()
 
     async def extract_all_fields(
         self,

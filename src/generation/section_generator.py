@@ -18,7 +18,8 @@ from ..core.models import (
     Citation,
 )
 from ..core.config_loader import SectionConfig, DataPointConfig
-from ..integrations.claude_client import ClaudeClient
+from ..integrations.llm_base import LLMClientProtocol
+from ..integrations.llm_factory import get_llm_client
 from .data_point_validator import DataContext, DataPointValidator
 
 logger = logging.getLogger(__name__)
@@ -37,10 +38,10 @@ class SectionGenerator:
 
     def __init__(
         self,
-        claude_client: Optional[ClaudeClient] = None,
+        claude_client: Optional[LLMClientProtocol] = None,
         data_point_validator: Optional[DataPointValidator] = None
     ):
-        self.claude_client = claude_client or ClaudeClient()
+        self.claude_client = claude_client or get_llm_client()
         self.data_point_validator = data_point_validator or DataPointValidator()
 
     async def generate_section(

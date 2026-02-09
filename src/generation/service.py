@@ -24,7 +24,8 @@ from ..core.config_loader import (
 )
 from ..core.exceptions import GenerationError, PipelineNotFoundError
 from ..integrations.dms_client import DMSClient
-from ..integrations.claude_client import ClaudeClient
+from ..integrations.llm_base import LLMClientProtocol
+from ..integrations.llm_factory import get_llm_client
 from .data_gatherer import DataGatherer
 from .section_generator import SectionGenerator
 from .document_assembler import DocumentAssembler
@@ -48,11 +49,11 @@ class GenerationService:
     def __init__(
         self,
         dms_client: Optional[DMSClient] = None,
-        claude_client: Optional[ClaudeClient] = None,
+        claude_client: Optional[LLMClientProtocol] = None,
         output_dir: Optional[str] = None
     ):
         self.dms_client = dms_client or DMSClient()
-        self.claude_client = claude_client or ClaudeClient()
+        self.claude_client = claude_client or get_llm_client()
         self.data_gatherer = DataGatherer(dms_client=self.dms_client)
         self.section_generator = SectionGenerator(claude_client=self.claude_client)
         self.document_assembler = DocumentAssembler(output_dir=output_dir)

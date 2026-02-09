@@ -8,7 +8,9 @@ services:
     ports:
       - "8000:8000"
     environment:
+      - LLM_PROVIDER=${LLM_PROVIDER:-anthropic}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - AGENT_MODEL=${AGENT_MODEL:-claude-sonnet-4-20250514}
       - AGENT_PERMISSION_MODE=${AGENT_PERMISSION_MODE:-bypassPermissions}
       - DMS_BASE_URL=http://dms:8080

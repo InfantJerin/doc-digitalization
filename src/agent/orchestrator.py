@@ -15,6 +15,8 @@ from ..extraction.citation_builder import CitationBuilder
 from ..extraction.field_extractor import FieldExtractor
 from ..extraction.structure_extractor import DocumentStructureExtractor
 from ..integrations.claude_client import ClaudeClient
+from ..integrations.llm_base import LLMClientProtocol
+from ..integrations.llm_factory import get_llm_client
 from .budget import BudgetTracker, budget_for_pipeline
 from .prompt_builder import PromptBuilder
 from .result_parser import ResultParser
@@ -56,6 +58,7 @@ class AgentOrchestrator:
         session_manager: Optional[SessionManager] = None,
         prompt_builder: Optional[PromptBuilder] = None,
         result_parser: Optional[ResultParser] = None,
+        llm_client: Optional[LLMClientProtocol] = None,
         claude_client: Optional[ClaudeClient] = None,
     ):
         self.settings = settings or get_settings()
@@ -64,15 +67,12 @@ class AgentOrchestrator:
         self.session_manager = session_manager or SessionManager()
         self.prompt_builder = prompt_builder or PromptBuilder(self.skill_registry)
         self.result_parser = result_parser or ResultParser()
-        self.claude_client = claude_client or ClaudeClient(
-            api_key=self.settings.anthropic_api_key,
-            model=self.settings.agent_model,
-        )
+        self.llm_client = llm_client or claude_client or get_llm_client(self.settings)
 
         # Transitional fallback components.
-        self._legacy_field_extractor = FieldExtractor(claude_client=self.claude_client)
+        self._legacy_field_extractor = FieldExtractor(claude_client=self.llm_client)
         self._legacy_structure_extractor = DocumentStructureExtractor(
-            claude_client=self.claude_client
+            claude_client=self.llm_client
         )
         self._legacy_citation_builder = CitationBuilder()
 
