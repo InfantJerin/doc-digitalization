@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     credit_agreement_max_turns: int = 150
     credit_agreement_max_budget_usd: float = 8.0
 
+    page_index_enabled: bool = True
+    page_index_max_build_time_seconds: int = 120
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

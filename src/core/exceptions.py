@@ -110,6 +110,22 @@ class AgentBudgetExceededError(AgentError):
 
 
 # =============================================================================
+# Indexing Errors
+# =============================================================================
+
+class IndexingError(DocDigitalizationError):
+    """Error during index construction."""
+    pass
+
+
+class IndexNotFoundError(IndexingError):
+    """Pre-built index not found."""
+    def __init__(self, index_id: str):
+        self.index_id = index_id
+        super().__init__(f"Index not found: {index_id}")
+
+
+# =============================================================================
 # Generation Errors
 # =============================================================================
 

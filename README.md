@@ -205,7 +205,7 @@ You can run a real extraction smoke test directly against the sample PDF in `res
 python scripts/smoke_test_extraction.py \
   --pipeline-id credit-agreement \
   --document-path "resources/credit agreement/AbbieVie Term Loan Credit Agreement.pdf" \
-  --output /tmp/smoke_extraction_output.json
+  --output ./smoke_extraction_output.json
 ```
 
 What this does:

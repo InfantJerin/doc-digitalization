@@ -10,9 +10,10 @@ import uuid
 
 from ..agent.orchestrator import AgentOrchestrator
 from ..agent.result_parser import ResultParser
-from ..core.config_loader import ConfigLoader, ExtractionPipelineConfig
+from ..core.config_loader import ConfigLoader, ExtractionPipelineConfig, PageIndexConfig
 from ..core.exceptions import ExtractionError
 from ..core.models import (
+    DealPageIndex,
     ExtractionRun,
     PipelineType,
     ReviewStatus,
@@ -21,7 +22,11 @@ from ..core.models import (
 )
 from ..database.repositories.extraction_repo import ExtractionRepository
 from ..database.repositories.review_repo import ReviewRepository
+from ..indexing.deal_indexer import DealIndexer
+from ..indexing.document_indexer import DocumentIndexer
+from ..indexing.index_store import IndexStore
 from ..integrations.dms_client import DMSClient
+from ..integrations.llm_factory import get_llm_client
 from .workspace import ExtractionWorkspace, ExtractionWorkspaceManager
 
 logger = logging.getLogger(__name__)
@@ -40,6 +45,8 @@ class ExtractionService:
         orchestrator: Optional[AgentOrchestrator] = None,
         workspace_manager: Optional[ExtractionWorkspaceManager] = None,
         result_parser: Optional[ResultParser] = None,
+        document_indexer: Optional[DocumentIndexer] = None,
+        deal_indexer: Optional[DealIndexer] = None,
     ):
         self.dms_client = dms_client or DMSClient()
         self.config_loader = config_loader or ConfigLoader()
@@ -48,6 +55,8 @@ class ExtractionService:
         self.orchestrator = orchestrator or AgentOrchestrator(config_loader=self.config_loader)
         self.workspace_manager = workspace_manager or ExtractionWorkspaceManager()
         self.result_parser = result_parser or ResultParser()
+        self.document_indexer = document_indexer
+        self.deal_indexer = deal_indexer
 
     async def run_extraction(
         self,
@@ -90,10 +99,22 @@ class ExtractionService:
             workspace = self.workspace_manager.create(run.id)
             document_paths = await self._download_documents(document_ids, workspace)
 
+            # Build PageIndex if enabled
+            deal_index: Optional[DealPageIndex] = None
+            if config.page_index.enabled:
+                deal_index = await self._build_page_index(
+                    deal_id=deal_id,
+                    document_ids=document_ids,
+                    document_paths=document_paths,
+                    workspace=workspace,
+                    page_index_config=config.page_index,
+                )
+
             result = await self.orchestrator.run_extraction(
                 pipeline_id=pipeline_id,
                 workspace_path=workspace.root,
                 document_paths=document_paths,
+                deal_index=deal_index,
             )
             self.orchestrator.write_debug_prompt(workspace.root, result.prompt)
             self.orchestrator.write_debug_output(workspace.root, result.output)
@@ -174,6 +195,58 @@ class ExtractionService:
             )
 
         return completed
+
+    async def _build_page_index(
+        self,
+        deal_id: str,
+        document_ids: list[str],
+        document_paths: list[Path],
+        workspace: ExtractionWorkspace,
+        page_index_config: PageIndexConfig,
+    ) -> Optional[DealPageIndex]:
+        """Build PageIndex for the deal's documents."""
+        try:
+            from ..indexing.document_indexer import DocumentIndexer
+            from ..indexing.deal_indexer import DealIndexer
+            from ..indexing.index_store import IndexStore
+
+            doc_indexer = self.document_indexer or DocumentIndexer()
+            dl_indexer = self.deal_indexer or DealIndexer()
+            index_store = IndexStore(workspace.root)
+
+            document_indexes = {}
+            for doc_id, doc_path in zip(document_ids, document_paths):
+                doc_index = await doc_indexer.build_index(
+                    pdf_path=doc_path,
+                    document_id=doc_id,
+                    use_llm_keywords=page_index_config.use_llm_keywords,
+                    skip_layout_analysis=page_index_config.skip_layout_analysis,
+                )
+                index_store.save_document_index(doc_index)
+                document_indexes[doc_id] = doc_index
+
+            deal_index = await dl_indexer.build_deal_index(
+                deal_id=deal_id,
+                document_indexes=document_indexes,
+                detect_cross_references=page_index_config.detect_cross_references,
+            )
+            index_store.save_deal_index(deal_index)
+            logger.info(
+                "PageIndex built for deal %s: %d docs, %d keywords, %d cross-refs",
+                deal_id,
+                len(document_indexes),
+                len(deal_index.unified_keywords),
+                len(deal_index.cross_references),
+            )
+            return deal_index
+
+        except Exception:
+            logger.warning(
+                "PageIndex build failed for deal %s, continuing without index",
+                deal_id,
+                exc_info=True,
+            )
+            return None
 
     async def _download_documents(
         self,

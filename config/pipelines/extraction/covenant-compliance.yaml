@@ -27,6 +27,14 @@ extraction_use_case:
       - "Definitions"
       - "Financial Covenants"
 
+  # Page index pre-processing
+  page_index:
+    enabled: true
+    use_llm_keywords: false
+    detect_cross_references: true
+    max_keywords_per_doc: 500
+    skip_layout_analysis: false
+
   # Trigger configuration
   triggers:
     manual:

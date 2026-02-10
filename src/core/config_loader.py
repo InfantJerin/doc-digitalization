@@ -153,6 +153,15 @@ class PostSinkConfig(BaseModel):
     headers: dict = Field(default_factory=dict)
 
 
+class PageIndexConfig(BaseModel):
+    """Configuration for the PageIndex pre-processing system."""
+    enabled: bool = True
+    use_llm_keywords: bool = False
+    detect_cross_references: bool = True
+    max_keywords_per_doc: int = 500
+    skip_layout_analysis: bool = False
+
+
 class ExtractionPipelineConfig(BaseModel):
     """Complete configuration for an extraction pipeline."""
     id: str
@@ -163,6 +172,7 @@ class ExtractionPipelineConfig(BaseModel):
     large_document_handling: LargeDocumentConfig = Field(
         default_factory=LargeDocumentConfig
     )
+    page_index: PageIndexConfig = Field(default_factory=PageIndexConfig)
 
     triggers: TriggersConfig = Field(default_factory=TriggersConfig)
     extraction_schema: dict[str, FieldSchemaConfig]

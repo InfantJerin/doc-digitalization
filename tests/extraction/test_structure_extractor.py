@@ -88,6 +88,37 @@ class TestDocumentStructureExtractor:
         result = extractor._find_title_in_pages("ARTICLE II", page_texts)
         assert result is None
 
+    @pytest.mark.asyncio
+    async def test_programmatic_toc_parsing_without_llm(self, tmp_path):
+        fitz = pytest.importorskip("fitz")
+
+        pdf_path = tmp_path / "toc_sample.pdf"
+        doc = fitz.open()
+        page1 = doc.new_page()
+        page1.insert_text((72, 72), "TABLE OF CONTENTS", fontsize=14)
+        page1.insert_text((72, 110), "ARTICLE 1 DEFINITIONS", fontsize=11)
+        page1.insert_text((72, 130), "1", fontsize=11)
+        page1.insert_text((72, 150), "Section 1.01. Certain Defined Terms. ......... 1", fontsize=11)
+        page1.insert_text((72, 170), "ARTICLE 2 COVENANTS", fontsize=11)
+        page1.insert_text((72, 190), "5", fontsize=11)
+        page1.insert_text((72, 210), "Section 2.01. Financial Covenant. ............. 5", fontsize=11)
+
+        for _ in range(6):
+            p = doc.new_page()
+            p.insert_text((72, 72), "Body text", fontsize=11)
+        doc.save(str(pdf_path))
+        doc.close()
+
+        local_extractor = DocumentStructureExtractor(
+            claude_client=None,
+            config=StructureExtractionConfig(generate_summaries=False),
+        )
+        structure = await local_extractor.extract(str(pdf_path))
+
+        assert structure.mode_used == ExtractionMode.TOC_WITH_PAGES
+        assert len(structure.root.children) >= 2
+        assert structure.root.children[0].title.startswith("ARTICLE 1")
+
 
 class TestDocumentNode:
     """Tests for DocumentNode."""

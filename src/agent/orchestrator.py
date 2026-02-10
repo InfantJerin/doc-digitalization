@@ -20,6 +20,7 @@ from ..core.config_loader import (
     FieldSchemaConfig,
     FieldStrategyConfig,
 )
+from ..core.models import DealPageIndex
 from ..core.schemas import CitationOutput, ExtractedFieldOutput, ExtractionResultOutput
 from ..core.settings import Settings, get_settings
 from ..extraction.citation_builder import CitationBuilder
@@ -90,6 +91,7 @@ class AgentOrchestrator:
         pipeline_id: str,
         workspace_path: Path,
         document_paths: list[Path],
+        deal_index: Optional[DealPageIndex] = None,
     ) -> AgentOrchestratorResult:
         """Execute extraction pipeline for a prepared run workspace."""
         config = self.config_loader.load_extraction_pipeline(pipeline_id)
@@ -98,11 +100,19 @@ class AgentOrchestrator:
         session = self.session_manager.open(workspace_path)
         budget = BudgetTracker(pipeline_id, budget_for_pipeline(self.settings, pipeline_id))
 
+        # Build index summary for prompt if available
+        index_summary: Optional[dict] = None
+        if deal_index:
+            from ..tools.index_tools import IndexTools
+            index_tools = IndexTools(deal_index)
+            index_summary = index_tools.get_index_summary()
+
         prompt = self.prompt_builder.build_extraction_prompt(
             config=config,
             workspace_path=workspace_path,
             document_paths=document_paths,
             field_skill_names=field_skill_names,
+            index_summary=index_summary,
         )
 
         output = await self._run_hybrid(
@@ -112,6 +122,7 @@ class AgentOrchestrator:
             document_paths=document_paths,
             budget=budget,
             field_skill_names=field_skill_names,
+            deal_index=deal_index,
         )
 
         self.session_manager.save(
@@ -133,6 +144,7 @@ class AgentOrchestrator:
         document_paths: list[Path],
         budget: BudgetTracker,
         field_skill_names: dict[str, str],
+        deal_index: Optional[DealPageIndex] = None,
     ) -> ExtractionResultOutput:
         logger.info(
             "Running hybrid extraction path for pipeline=%s provider=%s",
@@ -143,7 +155,12 @@ class AgentOrchestrator:
         if not document_paths:
             return self._default_output(config=config, session_id=session_id)
 
-        document_contexts = self._prepare_document_contexts(document_paths)
+        # Use indexed contexts when available, fall back to legacy
+        if deal_index:
+            document_contexts = self._prepare_indexed_contexts(document_paths, deal_index)
+        else:
+            document_contexts = self._prepare_document_contexts(document_paths)
+
         if not document_contexts:
             return self._default_output(config=config, session_id=session_id)
 
@@ -213,6 +230,51 @@ class AgentOrchestrator:
                 )
             except Exception:
                 logger.exception("Failed to prepare document context for %s", path)
+
+        return contexts
+
+    def _prepare_indexed_contexts(
+        self, document_paths: list[Path], deal_index: DealPageIndex
+    ) -> list[DocumentContext]:
+        """Build document contexts enriched with pre-built index data."""
+        contexts: list[DocumentContext] = []
+
+        for path in document_paths:
+            doc_id = path.stem
+            doc_index = deal_index.document_indexes.get(doc_id)
+
+            if fitz is None:
+                logger.warning("PyMuPDF unavailable, skipping indexed context for %s", path)
+                continue
+
+            try:
+                with fitz.open(str(path)) as doc:
+                    page_texts = [doc[i].get_text() for i in range(len(doc))]
+
+                # Build richer page index from structure
+                page_index: list[dict[str, Any]] = []
+                if doc_index and doc_index.structure:
+                    for node in doc_index.structure.get_all_nodes():
+                        page_index.append({
+                            "title": node.title,
+                            "page": node.start_page,
+                            "end_page": node.end_page,
+                            "node_id": node.id,
+                            "level": node.level,
+                            "summary": node.summary,
+                        })
+                else:
+                    page_index = self._build_page_index(page_texts)
+
+                contexts.append(
+                    DocumentContext(
+                        path=path,
+                        page_texts=page_texts,
+                        page_index=page_index,
+                    )
+                )
+            except Exception:
+                logger.exception("Failed to prepare indexed context for %s", path)
 
         return contexts
 

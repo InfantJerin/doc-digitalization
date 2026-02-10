@@ -15,6 +15,7 @@ class ExtractionWorkspace:
     root: Path
     documents_dir: Path
     artifacts_dir: Path
+    index_dir: Path
 
 
 class ExtractionWorkspaceManager:
@@ -27,13 +28,16 @@ class ExtractionWorkspaceManager:
         root = self.settings.extractions_root / run_id
         documents_dir = root / "documents"
         artifacts_dir = root / "artifacts"
+        index_dir = root / "index"
         documents_dir.mkdir(parents=True, exist_ok=True)
         artifacts_dir.mkdir(parents=True, exist_ok=True)
+        index_dir.mkdir(parents=True, exist_ok=True)
         return ExtractionWorkspace(
             run_id=run_id,
             root=root,
             documents_dir=documents_dir,
             artifacts_dir=artifacts_dir,
+            index_dir=index_dir,
         )
 
     def cleanup(self, workspace: ExtractionWorkspace) -> None:

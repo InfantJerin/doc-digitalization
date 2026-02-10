@@ -94,6 +94,16 @@ class ExtractionMode(Enum):
 # Core Domain Models
 # =============================================================================
 
+class TermType(Enum):
+    """Type of keyword/term in a document index."""
+    DEFINED_TERM = "defined_term"
+    SECTION_REFERENCE = "section_reference"
+    FINANCIAL_METRIC = "financial_metric"
+    ENTITY = "entity"
+    DATE = "date"
+    GENERAL = "general"
+
+
 @dataclass
 class Deal:
     """
@@ -211,6 +221,198 @@ class DocumentStructure:
             nodes.append(node)
         for child in node.children:
             self._collect_nodes(child, nodes)
+
+
+# =============================================================================
+# Page Index Models (for pre-processing / navigation)
+# =============================================================================
+
+@dataclass
+class PageLayout:
+    """Structured layout data for a single page."""
+    page_number: int = 1
+    headers: list[str] = field(default_factory=list)
+    paragraphs: list[str] = field(default_factory=list)
+    tables: list[dict] = field(default_factory=list)
+    footnotes: list[str] = field(default_factory=list)
+    images: list[dict] = field(default_factory=list)
+    word_count: int = 0
+
+    def to_dict(self) -> dict:
+        return {
+            "page_number": self.page_number,
+            "headers": self.headers,
+            "paragraphs": self.paragraphs,
+            "tables": self.tables,
+            "footnotes": self.footnotes,
+            "images": self.images,
+            "word_count": self.word_count,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "PageLayout":
+        return cls(
+            page_number=data.get("page_number", 1),
+            headers=data.get("headers", []),
+            paragraphs=data.get("paragraphs", []),
+            tables=data.get("tables", []),
+            footnotes=data.get("footnotes", []),
+            images=data.get("images", []),
+            word_count=data.get("word_count", 0),
+        )
+
+
+@dataclass
+class KeywordEntry:
+    """Inverted keyword index entry."""
+    term: str = ""
+    canonical_term: str = ""
+    pages: list[int] = field(default_factory=list)
+    sections: list[str] = field(default_factory=list)
+    term_type: TermType = TermType.GENERAL
+    definition_page: Optional[int] = None
+
+    def to_dict(self) -> dict:
+        return {
+            "term": self.term,
+            "canonical_term": self.canonical_term,
+            "pages": self.pages,
+            "sections": self.sections,
+            "term_type": self.term_type.value,
+            "definition_page": self.definition_page,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "KeywordEntry":
+        return cls(
+            term=data.get("term", ""),
+            canonical_term=data.get("canonical_term", ""),
+            pages=data.get("pages", []),
+            sections=data.get("sections", []),
+            term_type=TermType(data.get("term_type", TermType.GENERAL.value)),
+            definition_page=data.get("definition_page"),
+        )
+
+
+@dataclass
+class CrossDocumentReference:
+    """Edge linking two documents via a textual reference."""
+    source_document_id: str = ""
+    source_page: int = 0
+    reference_text: str = ""
+    target_document_id: str = ""
+    target_node_id: str = ""
+    target_page: Optional[int] = None
+    confidence: float = 0.0
+
+    def to_dict(self) -> dict:
+        return {
+            "source_document_id": self.source_document_id,
+            "source_page": self.source_page,
+            "reference_text": self.reference_text,
+            "target_document_id": self.target_document_id,
+            "target_node_id": self.target_node_id,
+            "target_page": self.target_page,
+            "confidence": self.confidence,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CrossDocumentReference":
+        return cls(
+            source_document_id=data.get("source_document_id", ""),
+            source_page=data.get("source_page", 0),
+            reference_text=data.get("reference_text", ""),
+            target_document_id=data.get("target_document_id", ""),
+            target_node_id=data.get("target_node_id", ""),
+            target_page=data.get("target_page"),
+            confidence=data.get("confidence", 0.0),
+        )
+
+
+@dataclass
+class DocumentPageIndex:
+    """Complete per-document index with structure, layouts, and keywords."""
+    document_id: str = ""
+    document_type: str = ""
+    total_pages: int = 0
+    structure: Optional[DocumentStructure] = None
+    page_layouts: list[PageLayout] = field(default_factory=list)
+    keyword_index: list[KeywordEntry] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "document_id": self.document_id,
+            "document_type": self.document_type,
+            "total_pages": self.total_pages,
+            "structure": {
+                "document_id": self.structure.document_id,
+                "root": self.structure.root.to_dict(),
+                "mode_used": self.structure.mode_used.value,
+                "total_pages": self.structure.total_pages,
+                "toc_pages": self.structure.toc_pages,
+            } if self.structure else None,
+            "page_layouts": [pl.to_dict() for pl in self.page_layouts],
+            "keyword_index": [kw.to_dict() for kw in self.keyword_index],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "DocumentPageIndex":
+        structure = None
+        if data.get("structure"):
+            s = data["structure"]
+            structure = DocumentStructure(
+                document_id=s.get("document_id", ""),
+                root=DocumentNode.from_dict(s.get("root", {})),
+                mode_used=ExtractionMode(s.get("mode_used", ExtractionMode.PDF_BOOKMARKS.value)),
+                total_pages=s.get("total_pages", 0),
+                toc_pages=s.get("toc_pages", []),
+            )
+        return cls(
+            document_id=data.get("document_id", ""),
+            document_type=data.get("document_type", ""),
+            total_pages=data.get("total_pages", 0),
+            structure=structure,
+            page_layouts=[PageLayout.from_dict(pl) for pl in data.get("page_layouts", [])],
+            keyword_index=[KeywordEntry.from_dict(kw) for kw in data.get("keyword_index", [])],
+        )
+
+
+@dataclass
+class DealPageIndex:
+    """Deal-spanning composite index across all documents."""
+    deal_id: str = ""
+    document_registry: dict[str, str] = field(default_factory=dict)  # doc_id -> doc_type
+    document_indexes: dict[str, DocumentPageIndex] = field(default_factory=dict)
+    unified_keywords: list[KeywordEntry] = field(default_factory=list)
+    cross_references: list[CrossDocumentReference] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "deal_id": self.deal_id,
+            "document_registry": self.document_registry,
+            "document_indexes": {
+                doc_id: idx.to_dict() for doc_id, idx in self.document_indexes.items()
+            },
+            "unified_keywords": [kw.to_dict() for kw in self.unified_keywords],
+            "cross_references": [cr.to_dict() for cr in self.cross_references],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "DealPageIndex":
+        return cls(
+            deal_id=data.get("deal_id", ""),
+            document_registry=data.get("document_registry", {}),
+            document_indexes={
+                doc_id: DocumentPageIndex.from_dict(idx)
+                for doc_id, idx in data.get("document_indexes", {}).items()
+            },
+            unified_keywords=[
+                KeywordEntry.from_dict(kw) for kw in data.get("unified_keywords", [])
+            ],
+            cross_references=[
+                CrossDocumentReference.from_dict(cr) for cr in data.get("cross_references", [])
+            ],
+        )
 
 
 # =============================================================================

@@ -32,3 +32,26 @@ def test_prompt_builder_includes_config_and_workspace(tmp_path):
     assert "Pipeline Configuration" in prompt
     assert "borrower" in prompt
     assert str(tmp_path) in prompt
+
+
+def test_prompt_builder_includes_index_summary_when_present(tmp_path):
+    registry = SkillRegistry(Path("skills"))
+    builder = PromptBuilder(registry)
+
+    config = ExtractionPipelineConfig(
+        id="demo",
+        name="Demo",
+        document_types=[{"type": "credit_agreement", "required": True}],
+        extraction_schema={"borrower": {"type": "string"}},
+    )
+
+    prompt = builder.build_extraction_prompt(
+        config=config,
+        workspace_path=tmp_path,
+        document_paths=[tmp_path / "doc.pdf"],
+        field_skill_names={},
+        index_summary={"deal_id": "deal-1", "document_count": 1},
+    )
+
+    assert "Page Index Summary" in prompt
+    assert "Index Navigation Tools" in prompt

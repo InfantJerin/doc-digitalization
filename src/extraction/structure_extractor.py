@@ -24,7 +24,6 @@ except ImportError:
 from ..core.models import DocumentNode, DocumentStructure, ExtractionMode
 from ..core.exceptions import StructureExtractionError, DocumentProcessingError
 from ..integrations.llm_base import LLMClientProtocol
-from ..integrations.llm_factory import get_llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +49,7 @@ class DocumentStructureExtractor:
         claude_client: Optional[LLMClientProtocol] = None,
         config: Optional[StructureExtractionConfig] = None
     ):
-        self.claude_client = claude_client or get_llm_client()
+        self.claude_client = claude_client
         self.config = config or StructureExtractionConfig()
 
         if fitz is None:
@@ -79,6 +78,8 @@ class DocumentStructureExtractor:
         # Strategy 1: Try PDF native bookmarks (instant, no LLM cost)
         structure = self._try_pdf_bookmarks(doc)
         if structure:
+            self._augment_special_sections(doc, structure)
+            self._compute_end_pages(structure, total_pages)
             logger.info("Structure extracted via PDF bookmarks")
             return DocumentStructure(
                 document_id=document_id,
@@ -87,32 +88,54 @@ class DocumentStructureExtractor:
                 total_pages=total_pages
             )
 
-        # Strategy 2: Look for TOC in first N pages
-        toc_result = await self._detect_and_parse_toc(doc)
+        # Strategy 2: Programmatic TOC parsing (no LLM)
+        toc_result = self._detect_and_parse_toc_programmatic(doc)
         if toc_result:
             structure, mode, toc_pages = toc_result
+            self._augment_special_sections(doc, structure)
+            self._compute_end_pages(structure, total_pages)
+            logger.info("Structure extracted via programmatic TOC parsing")
+            if self.config.generate_summaries and self.claude_client:
+                await self._add_summaries(doc, structure)
+            return DocumentStructure(
+                document_id=document_id,
+                root=structure,
+                mode_used=mode,
+                total_pages=total_pages,
+                toc_pages=toc_pages
+            )
 
-            # Verify structure accuracy
-            accuracy = await self._verify_structure(doc, structure)
-            if accuracy >= self.config.min_accuracy_threshold:
-                logger.info(f"Structure extracted via {mode.value} (accuracy: {accuracy:.1%})")
-                if self.config.generate_summaries:
-                    await self._add_summaries(doc, structure)
-                return DocumentStructure(
-                    document_id=document_id,
-                    root=structure,
-                    mode_used=mode,
-                    total_pages=total_pages,
-                    toc_pages=toc_pages
-                )
-            else:
-                logger.warning(f"TOC extraction accuracy too low: {accuracy:.1%}")
+        # Strategy 3: LLM-assisted TOC detection/parsing
+        if self.claude_client:
+            toc_result = await self._detect_and_parse_toc(doc)
+            if toc_result:
+                structure, mode, toc_pages = toc_result
+                self._augment_special_sections(doc, structure)
+                self._compute_end_pages(structure, total_pages)
 
-        # Strategy 3: Heading detection via formatting
+                # Verify structure accuracy
+                accuracy = await self._verify_structure(doc, structure)
+                if accuracy >= self.config.min_accuracy_threshold:
+                    logger.info(f"Structure extracted via {mode.value} (accuracy: {accuracy:.1%})")
+                    if self.config.generate_summaries:
+                        await self._add_summaries(doc, structure)
+                    return DocumentStructure(
+                        document_id=document_id,
+                        root=structure,
+                        mode_used=mode,
+                        total_pages=total_pages,
+                        toc_pages=toc_pages
+                    )
+                else:
+                    logger.warning(f"TOC extraction accuracy too low: {accuracy:.1%}")
+
+        # Strategy 4: Heading detection via formatting
         structure = self._detect_headings_by_formatting(doc)
         if structure and len(structure.children) >= 3:
+            self._augment_special_sections(doc, structure)
+            self._compute_end_pages(structure, total_pages)
             logger.info("Structure extracted via heading detection")
-            if self.config.generate_summaries:
+            if self.config.generate_summaries and self.claude_client:
                 await self._add_summaries(doc, structure)
             return DocumentStructure(
                 document_id=document_id,
@@ -121,9 +144,21 @@ class DocumentStructureExtractor:
                 total_pages=total_pages
             )
 
-        # Strategy 4: Generate structure from content (most expensive)
+        # Strategy 5: Generate structure from content (most expensive, LLM only)
+        if not self.claude_client:
+            logger.warning("No LLM client available; returning minimal fallback structure")
+            root = DocumentNode(id="root", title="Document", level=0, start_page=1, end_page=total_pages)
+            return DocumentStructure(
+                document_id=document_id,
+                root=root,
+                mode_used=ExtractionMode.HEADING_DETECTION,
+                total_pages=total_pages
+            )
+
         logger.info("Falling back to content-based structure generation")
         structure = await self._generate_structure_from_content(doc)
+        self._augment_special_sections(doc, structure)
+        self._compute_end_pages(structure, total_pages)
         if self.config.generate_summaries:
             await self._add_summaries(doc, structure)
         return DocumentStructure(
@@ -289,6 +324,151 @@ Return JSON:
         await self._find_section_pages(sections, page_texts)
 
         return self._build_tree_from_sections(sections, len(doc))
+
+    # =========================================================================
+    # Strategy 2a: Programmatic TOC Detection and Parsing (No LLM)
+    # =========================================================================
+
+    def _detect_and_parse_toc_programmatic(
+        self,
+        doc
+    ) -> Optional[tuple[DocumentNode, ExtractionMode, list[int]]]:
+        """Detect and parse TOC pages using deterministic regex heuristics."""
+        max_pages = min(self.config.toc_check_pages, len(doc))
+        toc_pages: list[int] = []
+        toc_lines: list[str] = []
+        started = False
+
+        for i in range(max_pages):
+            text = doc[i].get_text()
+            lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
+            lower_text = text.lower()
+
+            if "table of contents" in lower_text:
+                started = True
+                toc_pages.append(i + 1)
+                toc_lines.extend(lines)
+                continue
+
+            if not started:
+                continue
+
+            page_toc_hits = sum(1 for ln in lines if self._looks_like_toc_entry(ln))
+            if page_toc_hits >= 2:
+                toc_pages.append(i + 1)
+                toc_lines.extend(lines)
+            else:
+                break
+
+        if not toc_pages:
+            return None
+
+        sections = self._parse_toc_lines(toc_lines, len(doc))
+        if len(sections) < 3:
+            return None
+
+        return (
+            self._build_tree_from_sections(sections, len(doc)),
+            ExtractionMode.TOC_WITH_PAGES,
+            toc_pages,
+        )
+
+    def _looks_like_toc_entry(self, line: str) -> bool:
+        """Return True if line appears to be a TOC entry or continuation."""
+        cleaned = re.sub(r"\s+", " ", line.strip())
+        if not cleaned:
+            return False
+        if re.match(r"^(ARTICLE|Section|SCHEDULE|Schedule|EXHIBIT|Exhibit|APPENDIX|Appendix|PART|CHAPTER)\b", cleaned):
+            return True
+        if re.search(r"\.{2,}\s*\d{1,4}\s*$", cleaned):
+            return True
+        if re.match(r"^\d{1,4}$", cleaned):
+            return True
+        return False
+
+    def _parse_toc_lines(self, lines: list[str], total_pages: int) -> list[dict]:
+        """Parse TOC text lines into section dictionaries with page and level."""
+        sections: list[dict] = []
+        pending_title: Optional[str] = None
+
+        def emit(title: str, page: int):
+            title = re.sub(r"\s+", " ", title).strip(" .")
+            if not title:
+                return
+            if page < 1 or page > total_pages:
+                return
+            sections.append({
+                "title": title,
+                "page": page,
+                "level": self._infer_toc_level(title),
+            })
+
+        for raw in lines:
+            line = re.sub(r"\s+", " ", raw).strip()
+            if not line:
+                continue
+            if line.upper() in {"TABLE OF CONTENTS", "PAGE"}:
+                continue
+            if re.match(r"^[ivxlcdm]+$", line.lower()):
+                continue
+            if re.match(r"^#\d", line):
+                continue
+
+            dotted = re.match(r"^(?P<title>.+?)\.{2,}\s*(?P<page>\d{1,4})$", line)
+            if dotted:
+                full_title = dotted.group("title").strip()
+                if pending_title:
+                    full_title = f"{pending_title} {full_title}"
+                    pending_title = None
+                emit(full_title, int(dotted.group("page")))
+                continue
+
+            combined = re.match(
+                r"^(?P<title>(?:ARTICLE|Section|SCHEDULE|Schedule|EXHIBIT|Exhibit|APPENDIX|Appendix|PART|CHAPTER)\b.+?)\s+(?P<page>\d{1,4})$",
+                line,
+                re.IGNORECASE,
+            )
+            if combined:
+                emit(combined.group("title"), int(combined.group("page")))
+                pending_title = None
+                continue
+
+            if pending_title and re.match(r"^\d{1,4}$", line):
+                emit(pending_title, int(line))
+                pending_title = None
+                continue
+
+            if re.match(
+                r"^(ARTICLE|Section|SCHEDULE|Schedule|EXHIBIT|Exhibit|APPENDIX|Appendix|PART|CHAPTER)\b",
+                line,
+                re.IGNORECASE,
+            ):
+                pending_title = line
+            elif pending_title:
+                pending_title = f"{pending_title} {line}"
+
+        # Dedupe same title/page pairs while preserving order
+        seen: set[tuple[str, int]] = set()
+        deduped: list[dict] = []
+        for section in sections:
+            key = (section["title"], section["page"])
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(section)
+
+        return deduped
+
+    def _infer_toc_level(self, title: str) -> int:
+        """Infer hierarchy level from TOC entry title."""
+        t = title.strip().upper()
+        if re.match(r"^(ARTICLE|PART|CHAPTER|SCHEDULE|EXHIBIT|APPENDIX)\b", t):
+            return 1
+        if re.match(r"^SECTION\s+\d+(\.\d+)?", t):
+            return 2
+        if re.match(r"^\([A-Z0-9]+\)", t):
+            return 3
+        return 2
 
     async def _find_section_pages(self, sections: list, page_texts: list):
         """Find the page number for each section by searching the document."""
@@ -561,3 +741,57 @@ Return JSON: {{"summary": "brief summary"}}""",
             result.append(node)
         for child in node.children:
             self._flatten_nodes(child, result)
+
+    def _augment_special_sections(self, doc, root: DocumentNode) -> None:
+        """Add top-level nodes for Schedules/Exhibits/Appendices found in body pages.
+
+        TOCs often omit page numbers for these trailing sections. Without these nodes,
+        later pages can be incorrectly attributed to the final numbered section.
+        """
+        title_patterns = [
+            re.compile(r"^(SCHEDULE(?:S)?\s*[A-Z0-9\-]*)\b", re.IGNORECASE),
+            re.compile(r"^(EXHIBIT(?:S)?\s*[A-Z0-9\-]*)\b", re.IGNORECASE),
+            re.compile(r"^(APPENDIX(?:ES)?\s*[A-Z0-9\-]*)\b", re.IGNORECASE),
+        ]
+
+        existing_titles = {child.title.upper() for child in root.children}
+        max_id = 0
+        id_pattern = re.compile(r"node_(\d+)")
+        all_nodes: list[DocumentNode] = []
+        self._collect_nodes(root, all_nodes)
+        for node in all_nodes:
+            match = id_pattern.match(node.id or "")
+            if match:
+                max_id = max(max_id, int(match.group(1)))
+
+        additions: list[DocumentNode] = []
+        start_scan_idx = min(max(self.config.toc_check_pages, 1), max(len(doc) - 1, 0))
+        for page_idx in range(start_scan_idx, len(doc)):
+            page_num = page_idx + 1
+            lines = [ln.strip() for ln in doc[page_idx].get_text().splitlines()[:40] if ln.strip()]
+            for line in lines:
+                normalized = re.sub(r"\s+", " ", line).strip(" .")
+                for pattern in title_patterns:
+                    m = pattern.match(normalized)
+                    if not m:
+                        continue
+                    title = m.group(1).upper()
+                    if title in {"SCHEDULES", "EXHIBITS", "APPENDICES"}:
+                        continue
+                    if title in existing_titles:
+                        continue
+                    max_id += 1
+                    additions.append(
+                        DocumentNode(
+                            id=f"node_{max_id}",
+                            title=title,
+                            level=1,
+                            start_page=page_num,
+                        )
+                    )
+                    existing_titles.add(title)
+                    break
+
+        if additions:
+            root.children.extend(additions)
+            root.children.sort(key=lambda n: (n.start_page or 1, n.title))
